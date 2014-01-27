@@ -1,0 +1,4 @@
+AuthUserFile /opt/clam/etc/uipassword
+AuthType Basic
+AuthName "default user clam/clam"
+Require valid-user

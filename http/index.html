@@ -1,0 +1,541 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>CLAM Miner</title>
+	<link href="css/smoothness/jquery-ui-1.10.3.custom.css" rel="stylesheet">
+	<script src="js/jquery-1.9.1.js"></script>
+	<script src="js/jquery-ui-1.10.3.custom.js"></script>
+	<script>
+	
+		function check_response(r)
+		{
+			var stat = r['STATUS'];
+			if (stat['STATUS'] != 'S')
+			{
+			  $("#message_div").show();
+			  $("#message_text").html("出错了:" + stat['Msg']);
+			  return false;
+			}
+			else
+			{
+			  $("#message_div").hide();
+			  return true;
+			}
+		}
+		
+		function xhr_fail(xhr, status, error)
+		{
+    	$("#message_text").html("后台请求出错: " + status + "\nError: " + error);
+			 $("#message_div").show();
+  	}
+		
+		function refresh_status()
+		{
+			$.getJSON("svc.php", {"command":"summary"}, function(r)
+				{
+					if (check_response(r))
+					{
+						summary = r['SUMMARY'];
+						stat = r['STATUS'];
+						
+						$("#hashrate").html("当前所有设备总速度：" + (summary['MHS av']/1000).toFixed(3) + "G Hashes/s");
+						
+						$("#timestamp").html(new Date(stat['When']*1000));
+					}						
+				})
+				;
+		}
+
+		function refresh_pools()
+		{
+			$.getJSON("svc.php", {"command":"pools"}, function(r)
+			{
+				if (check_response(r))
+				{
+					$("#pool_status tbody tr").remove();
+	
+					$.each(r, function(nm, data){
+						if (nm != "STATUS")
+						{
+							$("#pool_status tbody").append("<tr><td>"+
+								data["POOL"] + "</td><td>" +
+								data["URL"] + "</td><td>" +
+								data["User"] + "</td><td>" +
+								data["Status"] + "</td><td>" +
+								parseInt(data["Difficulty Accepted"]) + "</td><td>" +
+								parseInt(data["Difficulty Rejected"]) + "</td><td>" +
+								parseInt(data["Difficulty Stale"]) + "</td><td>" + 
+									"<button pool=" + data["POOL"] + " t='switch'>切换为当前</button>" +
+								"</td></tr>");
+						}
+					});
+					$("#pool_status button[t='switch']").button()
+						.click(function(){
+							$.getJSON("svc.php", {"command":"switchpool|"+$(this).attr("pool")}, function(r){
+								if (check_response(r))
+								{
+									$("#success_dialog").dialog("open");
+									refresh_pools();
+								}
+							});
+						});
+				}
+			})
+			;
+		}
+		
+		function load_pools_conf()
+		{
+			$.getJSON("conf.php", {"command":"loadpools"}, function(r)
+			{
+					$("#pool_table tbody tr").remove();
+	
+					$.each(r, function(nm, data){
+							$("#pool_table tbody").append("<tr><td>"+
+								nm + "</td><td>" +
+								data["url"] + "</td><td>" +
+								data["user"] + "</td><td>" +
+								data["pass"] + "</td><td>" +
+									"<button pool=" + nm + " t='del'>删除</button>" +
+								"</td></tr>");
+					});
+					$("#pool_table button[t='del']").button()
+						.click(function(){
+							$.getJSON("conf.php", {"command":"removepool", "pool" : $(this).attr("pool")}, function(r){
+								if (check_response(r))
+								{
+									$("#success_message").html("删除成功，请重启cgminer以便新矿池设置生效。");
+									$("#success_dialog").dialog("open");
+									load_pools_conf();
+								}
+							});
+						});
+				})
+				.fail(xhr_fail)
+				;
+			}
+			
+			function load_network_conf()
+			{
+				$.getJSON("sys.php", {"command":"network_load"}, function(r){
+						
+						$("#ipaddress").val(r["ipaddress"]);
+						$("#netmask").val(r["netmask"]);
+						$("#gateway").val(r["gateway"]);
+						$("#dns1").val(r["dns1"]);
+						$("#dns2").val(r["dns2"]);
+						
+						if (r['type'] == 'static')
+						{
+							$("#network_type_static").click();
+						}
+						else
+						{
+							$("#network_type_dhcp").click();
+						}
+					});
+			}
+		
+		
+	$(function() {
+		
+		var url = $("#url");
+		var username = $("#username");
+		var password = $("#password");
+		var allFields = $([]).add(url).add(password).add(username);
+		
+		$( "#tabs" ).tabs();
+		
+		//状态界面
+		$("#restart").button()
+			.click(function(){
+				$.getJSON("sys.php", {"command":"restart"}, function(r)
+				{
+					$("#success_dialog").dialog("open");
+					
+					var counter = 30;
+					$("#success_message").html("操作成功，" + counter + "秒后自动刷新页面。");
+					var t = setInterval(function(){
+						if (counter > 0)
+						{
+							$("#success_message").html("操作成功，" + counter + "秒后自动刷新页面。");
+							counter--;
+						}
+						else
+						{
+							clearInterval(t);
+							window.location.reload();
+						}
+					}, 1000);
+				}
+			)
+			.fail(xhr_fail)
+			;
+		});
+		
+		
+		//矿池界面
+		$("#success_dialog").dialog({
+			autoOpen:false,
+			height:240,
+			width:320,
+			modal:true,
+			buttons:{
+				"确认":function(){
+				$(this).dialog("close");
+				}
+			}
+		});
+
+    $( "#dialog-add-pool" ).dialog({
+      autoOpen: false,
+      height: 480,
+      width: 400,
+      modal: true,
+      buttons: {
+        "确认": function() {
+          var bValid = true;
+          allFields.removeClass( "ui-state-error" );
+        	$.getJSON("conf.php", {"command" : "addpool", "url" : url.val(), "user" : username.val(), "pass" : password.val()}, function(r)
+        	  {
+        	  	if (check_response(r))
+        	  	{
+        	  		load_pools_conf();
+								$("#success_message").html("添加成功，请重启cgminer以便新矿池设置生效。");
+								$("#success_dialog").dialog("open");
+       	  		}
+        			$("#dialog-add-pool").dialog( "close" );
+        	  }
+        	)
+					.fail(xhr_fail)
+        	;
+          	
+        },
+        "取消": function() {
+          $( this ).dialog( "close" );
+        }
+      },
+      close: function() {
+        allFields.val( "" ).removeClass( "ui-state-error" );
+      }
+    });
+
+    $( "#pass-form" ).dialog({
+      autoOpen: false,
+      height: 480,
+      width: 400,
+      modal: true,
+      buttons: {
+        "确认": function() {
+          	$.post("sys.php", {"command" : "pass", "pass" : $("#login_password").val()}, function(r)
+          	  {
+          			$("#pass-form").dialog( "close" );
+			    			$("#success_message").html("密码修改成功");
+    						$("#success_dialog").dialog("open");
+          	  }
+          	);
+        },
+        "取消": function() {
+          $( this ).dialog( "close" );
+        }
+      },
+      close: function() {
+        allFields.val( "" ).removeClass( "ui-state-error" );
+      }
+    });
+    
+    $("#add_pool")
+			.button()
+			.click(function() {
+        $( "#dialog-add-pool" ).dialog( "open" );
+      });
+    $("#refresh_status")
+    	.button()
+    	.click(function(){
+    		refresh_pools();
+    		refresh_status();
+    	});
+
+    $("#message_div").hide();
+    
+    $("#save_conf").button()
+    	.click(function(){
+    		$.getJSON("svc.php", {"command":"save|/opt/minepeon/etc/miner.conf"}, function(r){
+    			if (check_response(r))
+    			{
+			    	$("#success_message").html("配置已保存");
+     				$("#success_dialog").dialog("open");
+    			}
+    		})
+				.fail(xhr_fail)
+    		;
+    	});
+    	
+    
+    //网络配置
+    $("#change_pass").button()
+    	.click(function()
+    	{
+    		$("#pass-form").dialog("open");
+    	});
+    	
+    $( "#network-confirm" ).dialog({
+      autoOpen: false,
+      height: 240,
+      width: 400,
+      modal: true,
+      buttons: {
+        "确认": function() {
+	    		var cmd;
+	    		if ($("input[name='network_type']:checked").val() == 'dhcp')
+	    			cmd = 'dhcp';
+	    		else
+	    			cmd = 'static';
+    			
+	    		$.get("sys.php", {
+	    				"command":"network_save", 
+	    				"type" : cmd, 
+	    				"ipaddress": $("#ipaddress").val(), 
+	    				"netmask" : $("#netmask").val(), 
+	    				"gateway":$("#gateway").val(), 
+	    				"dns1" : $("#dns1").val(), 
+	    				"dns2" : $("#dns2").val()}, 
+	    				function(r){
+	    					$("#network-confirm").dialog("close");
+			    			$("#success_message").html("操作成功，控制器正在重启，请稍后刷新页面或转往新IP地址。");
+			    			$("#success_dialog").dialog("open");
+			    		})
+					.fail(xhr_fail);
+        },
+        "取消": function() {
+          $( this ).dialog( "close" );
+        }
+      },
+      close: function() {
+        allFields.val( "" ).removeClass( "ui-state-error" );
+      }
+    });
+
+    	
+    $("#network_save").button()
+    	.click(function(){
+    		$("#network-confirm").dialog("open");
+    	});
+    ;
+    
+		$("#network_type").buttonset();
+		$("#network_type :radio").change(function(){
+			if ($(this).val()=='static')
+			{
+				$("#network_static_div").show();
+			}
+			else
+			{
+				$("#network_static_div").hide();
+			}
+		});
+		
+		//系统配置
+		$("#upload_cgminer").button();
+		
+		//主程序
+
+		refresh_status();
+		refresh_pools();
+		setInterval(refresh_status, 5000);
+		setInterval(refresh_pools, 5000);
+		load_pools_conf();
+		load_network_conf();
+
+	});
+
+	</script>
+	<style>
+	body{
+		margin: 50px;
+	}
+	#hashrate{
+		font-size: 24pt;
+		text-align: center;
+	}
+	#timestamp{
+		text-align:center;
+	}
+	
+  table { margin: 1em 0; border-collapse: collapse; width: 100%; }
+  table td, table th { border: 1px solid #eee; padding: .6em 10px; text-align: left; }
+    .validateTips { border: 1px solid transparent; padding: 0.3em; }
+    fieldset { padding:0; border:0; margin-top:25px; }
+    label, input { display:block; }
+    input.text { margin-bottom:12px; width:95%; padding: .4em; }
+
+
+/*
+	====for upload
+*/
+
+*{margin:0;padding:0;}
+a{text-decoration:none;}
+.btn_addPic{
+display: block;
+position: relative;
+width: 140px;
+height: 39px;
+overflow: hidden;
+border: 1px solid #DDDDDD;
+background: none repeat scroll 0 0 #F3F3F3;
+color: #999999;
+cursor: pointer;
+text-align: center;
+}
+.btn_addPic span{display: block;line-height: 39px;}
+.btn_addPic:hover em{background-position:-19px 0;}
+.filePrew {
+display: block;
+position: absolute;
+top: 0;
+left: 0;
+width: 140px;
+height: 39px;
+font-size: 100px; /* 增大不同浏览器的可点击区域 */
+opacity: 0; /* 实现的关键点 */
+filter:alpha(opacity=0);/* 兼容IE */
+}
+
+
+	</style>
+</head>
+<body>
+	<div id="dialog-add-pool" title="矿池配置">
+  <p class="validateTips">请从各矿池获取对应的配置信息</p>
+  <form>
+    <fieldset>
+      <label for="url">矿池URL</label>
+    <input type="text" name="url" id="url" class="text ui-widget-content ui-corner-all">
+    <label for="username">用户名</label>
+    <input type="text" name="username" id="username" value="" class="text ui-widget-content ui-corner-all">
+    <label for="password">密码</label>
+    <input type="password" name="password" id="password" value="" class="text ui-widget-content ui-corner-all">
+  </fieldset>
+  </form>
+</div>
+
+	<div id="success_dialog" title="提示">
+		<p id="success_message">操作成功</p>
+	</div>
+	
+	<div id="pass-form">
+		  <form>
+		    <fieldset>
+		      <label for="login_user">登录用户名</label><input type="text" readonly="true" name="login_user" id="login_user" value="clam" class="text ui-widget-content ui-corner-all">
+			    <label for="login_password">登录密码</label><input type="password" name="login_password" id="login_password" value="" class="text ui-widget-content ui-corner-all">
+		  	</fieldset>
+	  </form>
+	</div>
+	
+	<div id="network-confirm" title="确认">
+  <p><span class="ui-icon ui-icon-alert" style="float:left; margin:0 7px 20px 0;"></span><span id="confirm_message">请确认更新网络配置并重新启动，如果设置不当，可能会导致控制器无法访问。</span></p>
+	</div>
+
+	<!-- Tabs -->
+<p id="board"><img src="logo.jpg"></p>
+<div class="ui-widget" id="message_div">
+	<div class="ui-state-highlight ui-corner-all" style="margin-top: 20px; padding: 0 .7em;">
+		<p><span class="ui-icon ui-icon-info" style="float: left; margin-right: .3em;"></span>
+		<span id="message_text"></span></p>
+	</div>
+</div>
+<div id="tabs">
+	<ul>
+		<li><a href="#tabs-1">当前状态</a></li>
+		<li><a href="#tabs-2">挖矿配置</a></li>
+		<li><a href="#tabs-3">网络配置</a></li>
+		<li><a href="#tabs-4">系统配置</a></li>
+	</ul>
+	<div id="tabs-1">
+		<p id="hashrate">cgminer API 未启动（可能是矿池未配置或矿池连接缓慢，请配置矿池或耐心等待）</p>
+		<p id="timestamp"></p>
+		<table id="pool_status" class="ui-widget ui-helper-clearfix">
+				<thead class='ui-widget ui-widget-content'>
+					<tr class='ui-widget-header'>
+						<th>编号</th>
+						<th>URL</th>
+						<th>用户</th>
+						<th>状态</th>
+						<th>接受</th>
+						<th>拒绝</th>
+						<th>抛弃</th>
+						<th>操作</th>
+					</tr>
+				</thead>
+				<tbody>
+				</tbody>
+		</table>
+		<button id="refresh_status">刷新</button>
+	</div>
+	<div id="tabs-2">
+		<table id="pool_table" class="ui-widget ui-helper-clearfix">
+				<thead class='ui-widget ui-widget-content'>
+					<tr class='ui-widget-header'>
+						<th>编号</th>
+						<th>URL</th>
+						<th>用户</th>
+						<th>密码</th>
+						<th>操作</th>
+					</tr>
+				</thead>
+				<tbody>
+				</tbody>
+		</table>
+		<button id="add_pool">添加矿池</button>
+		<button id="restart">重启cgminer</button>
+	</div>
+	<div id="tabs-3">
+		<div id="network_type">
+			网络IP设置：
+			<label for="network_type_dhcp">DHCP自动获取地址</label><input type="radio" name="network_type" id="network_type_dhcp" value="dhcp">
+			<label for="network_type_static">静态IP地址</label><input type="radio" name="network_type" id="network_type_static" value="static">
+		</div>
+		
+		<div id="network_static_div">
+		  <form>
+		    <fieldset>
+		    	<label for="ipaddress">静态IP地址</label><input type="text" name="ipaddress" id="ipaddress" class="text ui-widget-content ui-corner-all">
+			    <label for="netmask">子网掩码</label><input type="text" name="netmask" id="netmask" class="text ui-widget-content ui-corner-all">
+			    <label for="gateway">网关地址</label><input type="text" name="gateway" id="gateway" class="text ui-widget-content ui-corner-all">
+			    <label for="dns1">DNS服务器1</label><input type="text" name="dns1" id="dns1" class="text ui-widget-content ui-corner-all">
+			    <label for="dns2">DNS服务器2</label><input type="text" name="dns2" id="dns2" class="text ui-widget-content ui-corner-all">
+		  	</fieldset>
+		  </form>
+		</div>
+		<div> 
+			<hr>
+			<button id="network_save">保存网络配置并重启</button>
+		</div>
+	</div>
+	<div id="tabs-4">
+		<table style="border:0">
+			<tr>
+				<td width="150px">登录密码</td>
+				<td><button id="change_pass">修改登录密码</button></td>
+			</tr>
+			<tr>
+				<td width="150px">程序更新</td>
+				<td>
+					<form action="sys.php" method="post" enctype="multipart/form-data" target="iii">
+							<input type="hidden" name="command" value="cgminer">
+							<input type="file" name="cgminer_bin" id="cgminer_bin" required="true">
+							<p>&nbsp;</p>
+							<input type="submit" id="upload_cgminer" value="开始上传">
+					</form>
+				</td>
+			</tr>
+		</table>
+		
+		<iframe id="iii" width="100%" height="200" style="border:0">
+		</iframe>
+	</div>
+</div>
+</body>
+</html>
